@@ -1,0 +1,260 @@
+from airflow import DAG
+from airflow.operators.dummy import DummyOperator
+from airflow.operators.python import PythonOperator
+import os
+import requests
+from zipfile import ZipFile
+import re
+from bs4 import BeautifulSoup
+from airflow.operators.dagrun_operator import TriggerDagRunOperator
+from datetime import datetime, timezone
+from airflow.utils.trigger_rule import TriggerRule
+from airflow.models import Variable
+from urllib.parse import urljoin
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from multiprocessing.pool import ThreadPool
+
+# Variables
+ENVIRONMENT = Variable.get("ENVIRONMENT")
+BUCKET_NAME = f'1340738-datalake-{ENVIRONMENT}-raw'
+RF_URL = 'https://dadosabertos.rfb.gov.br/CNPJ/'
+
+
+TYPE = "batch"
+MODE = "historical"
+EVENT = "dadosgov"
+
+DAG_ID = f"{EVENT}_model_{ENVIRONMENT}_{MODE}"
+STEP_TASK_ID = f"add_steps_{EVENT}_model"  
+TAGS = ["DataLake", "EMR", EVENT.capitalize(), 'VERSIONAMENTO', 'CNPJ','S3','GOV']  
+
+s3_client = S3Hook(aws_conn_id='aws_default')
+
+# Set default arguments
+default_args = {
+                    "owner": "EMR-Airflow",
+                    "depends_on_past": False,
+                    "start_date": datetime(2022, 11, 30),
+                    "email": ["airflow@airflow.com"],
+                    "email_on_failure": False,
+                    "email_on_retry": False
+                }
+
+# SETTING SCHEDULER
+if ENVIRONMENT == "prd":
+        SCHEDULER = "0 0 * * *"
+else:
+    SCHEDULER = None
+
+
+def getobject(rf_url):
+    linksreturn = {}
+    
+    soup = BeautifulSoup(requests.get(rf_url).content, 'html.parser')
+    links = [urljoin(rf_url, link.get('href'))
+             for link in soup.find_all('a', href=re.compile('\.zip$'))]
+    
+    linksgov = [(re.sub(r'\d','',i.split('/')[-1].split('.')[0]), i) for i in links]
+
+    for i in linksgov:
+        if i[0] in linksreturn:
+            linksreturn[i[0]][0].append(i[1])
+        else:
+            linksreturn[i[0]] = [[i[1]],f'dados_publicos_cnpj/{i[0]}/',False]
+    
+
+    return linksreturn
+
+
+def getVersionS3(bucket, object):
+    keys = s3_client.list_keys(bucket, prefix=object)
+    
+    if len(keys) > 1:
+        firstObject = keys[0]
+        response = s3_client.get_key(firstObject, bucket)
+
+        # Imprime a data da última modificação
+        last_modified = response.last_modified.replace(tzinfo=None)
+        return last_modified
+
+    else:
+        return datetime(1999, 1, 1)
+
+def get_rf_versions():
+    versoes = {}
+    page = requests.get(RF_URL)
+    soup = BeautifulSoup(page.content, 'html.parser')
+    table = soup.find('table')
+    for row in table.find_all('tr'):
+        cells = row.find_all('td')
+        if cells:
+            if '.zip' in cells[1].text:
+                name = re.sub(r'\d','',cells[1].text.strip('.zip '))
+                #data_hora_str = re.sub(r'[^\d]+', '', cells[2].text)
+                versoes[name] = datetime.strptime(f'{cells[2].text.strip(" ")}:00', '%Y-%m-%d %H:%M:%S')
+
+    #print(versoes)
+    return versoes
+
+def versionamento():
+    links = getobject(RF_URL)
+    versionS3 = {k: getVersionS3(BUCKET_NAME, v[1]) for k,v in links.items()}
+    versionUrl = get_rf_versions()
+
+    for k, v in links.items():
+        if versionUrl[k] > versionS3[k]:
+            v[2] = True
+
+    return {k : v for k , v in links.items() if v[2]}
+
+def download(task_instance):
+    results = {}
+    file_urls = task_instance.xcom_pull(task_ids=f'versionamento')
+    for k, v in file_urls.items():
+        print(f'DOWNLOADING {k}')
+        pool = ThreadPool(len(v[0]))
+        result = pool.map(runDownloadFiles, v[0])
+        pool.close()
+        pool.join()
+        #result = pool.get_results()
+        results[k] = result
+    return results
+
+def skip():
+    print('*'*50)
+    print('A versão do arquivo está ok')
+    print('*'*50)
+    return 'Finish'
+
+def runDownloadFiles(file_url):
+    response = requests.head(file_url)
+    file_name = os.path.basename(file_url)
+    folder_name = os.path.splitext(file_name)[0]
+
+    endereco = re.sub(r'\d+', '', folder_name)
+    os.makedirs(endereco, exist_ok=True)
+
+    checkfiles = os.listdir(endereco)
+    if f"{folder_name}.zip" in checkfiles or f"{folder_name}.CSV" in checkfiles:
+        print('Arquivo já existe')
+        os.remove(f'{endereco}/{file_name}')
+
+    
+    response = requests.get(file_url, stream=True)
+    print('*' * 100)
+    print(f"Downloading {file_name}")
+    
+    with open(f'{endereco}/{file_name}', "wb") as f:
+        for chunk in response.iter_content(chunk_size=1024):
+            if chunk:
+                f.write(chunk)
+    
+    print(f'Download {file_name} Concluido!')
+    print('*' * 100)
+
+    return f'{endereco}/{file_name}'
+
+def extract(file):
+    folder_path = os.path.dirname(file)
+    #newfolderPath = f'unzipFiles/{folder_path}'
+    #os.makedirs(newfolderPath, exist_ok=True)
+
+    print('*'*150)
+    print('Iniciando Extração')
+    print('*'*150)
+
+    newName = file.split("/")[-1].replace(".zip",".csv")
+    newNamePath = f'{folder_path}/{newName}'
+
+    with ZipFile(file, "r") as zip_file:
+        for compressed_file in zip_file.namelist():
+            print(compressed_file)
+            zip_file.extract(compressed_file, folder_path)
+
+        os.rename(os.path.join(
+            folder_path, compressed_file), newNamePath)
+        print(
+            f'Arquivo {compressed_file} renomeado para {newNamePath}')
+        
+    os.remove(file)
+    print('*'*50)
+
+    return newNamePath
+
+def extracAll(task_instance):
+    results = []
+    files_zip = task_instance.xcom_pull(task_ids=f'Downloading')
+    #files_zip = arquivos0
+
+    for k, v in files_zip.items():
+        print(f'EXTRAINDO {k}')
+        pool = ThreadPool(len(v))
+        result = pool.map(extract, v)
+        pool.close()
+        pool.join()
+        #result = pool.get_results()
+        results.extend(result)
+    return results
+
+def uploadS3(path):
+    print('*' * 150)
+    print(f'ARQUIVO ATUAL: {path}')
+
+    print(f"Enviando {path} para o bucket {BUCKET_NAME} endereço da pasta: dados_publicos_cnpj/{path}")
+
+    s3_client.load_file(
+        filename=path,
+        key=f'dados_publicos_cnpj/{path}',
+        bucket_name=BUCKET_NAME,
+        replace=True
+    )
+    print(f'Arquivo {path} Enviado!')
+    print(f'Excluindo {path}')
+    os.remove(path)
+    print('*' * 150)
+
+def uploadS3All(task_instance):
+    file = task_instance.xcom_pull(task_ids=f'Extraindo')
+    pool = ThreadPool(10)
+    pool.map(uploadS3, file)
+    pool.close()
+    pool.join()
+
+
+
+with DAG(
+    DAG_ID,
+    default_args = default_args,
+    start_date=datetime(2022, 3, 31),
+    schedule_interval=SCHEDULER,
+    catchup=False,
+    tags=TAGS) as dag:
+
+    Start = DummyOperator(task_id="Start")
+    Finish = DummyOperator(
+        task_id="Finish", trigger_rule=TriggerRule.NONE_FAILED)
+
+    taskgetlink = PythonOperator(
+        task_id=f'versionamento',
+        python_callable=versionamento
+    )
+
+    taskdownload = PythonOperator(
+        task_id='Downloading',
+        python_callable=download
+    )
+
+    taskextract = PythonOperator(
+        task_id = 'Extraindo',
+        python_callable=extracAll
+    )
+
+    taskupload = PythonOperator(
+        task_id='Uploading_files',
+        python_callable=uploadS3All
+    )
+
+# ORQUESTRAÇÃO
+Start >> taskgetlink >> taskdownload
+taskdownload >> taskextract >> taskupload
+taskupload >> Finish
