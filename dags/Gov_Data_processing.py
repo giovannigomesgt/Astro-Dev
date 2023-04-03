@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from airflow import DAG
 from airflow.models import Variable
+from airflow.utils.trigger_rule import TriggerRule
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.providers.amazon.aws.operators.emr import (
     EmrCreateJobFlowOperator,
@@ -11,7 +12,6 @@ from airflow.providers.amazon.aws.operators.emr import (
 )
 from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor, EmrJobFlowSensor
 
-
 # VARIABLES
 EVENT = "Gov"
 TYPE = "batch"
@@ -19,6 +19,100 @@ MODE = "processamento"
 
 ENVIRONMENT = Variable.get("ENVIRONMENT")
 # CONF_CLUSTER = Variable.get("path_conf_cluster")
+
+
+
+##################### CONFIGURAÇÃO ##############################
+configCluster={
+    "Name": f"{TYPE}-{EVENT}-model-{ENVIRONMENT}-{MODE}",
+    "LogUri": f"s3://256240406578-datalake-{ENVIRONMENT}-raw/emr-logs",
+    "ReleaseLabel": "emr-6.9.0",
+    "Applications": [
+        {
+            "Name": "Spark"
+        },
+        {
+            "Name": "Hadoop"
+        }
+    ],
+    "Configurations": [
+        {
+            "Classification": "spark-defaults",
+            "Properties": {
+                "spark.submit.deployMode": "cluster",
+                "spark.speculation": "false",
+                "spark.sql.adaptive.enabled": "true",
+                "spark.serializer": "org.apache.spark.serializer.KryoSerializer",
+                "spark.driver.extraJavaOptions":
+                "-XX:+UseG1GC -XX:+UnlockDiagnosticVMOptions -XX:+G1SummarizeConcMark -XX:InitiatingHeapOccupancyPercent=35 -verbose:gc -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:OnOutOfMemoryError=\"kill -9 %p\"",
+                "spark.storage.level": "MEMORY_AND_DISK_SER",
+                "spark.rdd.compress": "true",
+                "spark.shuffle.compress": "true",
+                "spark.shuffle.spill.compress": "true"
+            }
+        },
+        {
+            "Classification": "spark",
+            "Properties": {
+                "maximizeResourceAllocation": "true"
+            }
+        }
+    ],
+    "Instances": {
+        "InstanceGroups": [
+            {
+                "Name": "Master nodes",
+                "Market": "ON_DEMAND",
+                "InstanceRole": "MASTER",
+                "InstanceType": "c5.xlarge",
+                "InstanceCount": 1
+            },
+            {
+                "Name": "Worker nodes",
+                "Market": "ON_DEMAND",
+                "InstanceRole": "CORE",
+                "InstanceType": "r5a.xlarge",
+                "InstanceCount": 3
+            }
+        ],
+        "KeepJobFlowAliveWhenNoSteps": True,
+        "TerminationProtected": False,
+        "Ec2SubnetId": "subnet-00709a3ade46a24c7"
+    },
+    "JobFlowRole": "EMR_EC2_DefaultRole",
+    "ServiceRole": "EMR_DefaultRole",
+    "VisibleToAllUsers": True,
+    "Tags": [
+        {
+            "Key": "BusinessDepartment",
+            "Value": "Pottencial"
+        },
+        {
+            "Key": "CostCenter",
+            "Value": "N/A"
+        },
+        {
+            "Key": "Environment",
+            "Value": f"{ENVIRONMENT}"
+        },
+        {
+            "Key": "ProjectName",
+            "Value": "Data Lake"
+        },
+        {
+            "Key": "TechnicalTeam",
+            "Value": "Arquitetura"
+        }
+    ],
+    "AutoTerminationPolicy": {
+        "IdleTimeout": 120
+    },
+    "StepConcurrencyLevel": 3
+    },
+
+
+
+
 
 # Spark steps
 SPARK_STEPS = [
@@ -41,9 +135,9 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Cnaes.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Cnaes.py'
                      ]
-        }
+        } #'
     },
     # Motivos
     {
@@ -65,7 +159,7 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Motivos.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Motivos.py'
                      ]
         }
     },
@@ -89,7 +183,7 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Municipios.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Municipios.py'
                      ]
         }
     },
@@ -113,7 +207,7 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Naturezas.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Naturezas.py'
                      ]
         }
     },
@@ -137,7 +231,7 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Paises.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Paises.py'
                      ]
         }
     },
@@ -161,7 +255,7 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Qualificacoes.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Qualificacoes.py'
                      ]
         }
     },
@@ -185,7 +279,7 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Empresas.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Empresas.py'
                      ]
         }
     },
@@ -209,7 +303,7 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Estabelecimentos.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Estabelecimentos.py'
                      ]
         }
     },
@@ -233,7 +327,7 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Simples.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Simples.py'
                      ]
         }
     },
@@ -257,14 +351,11 @@ SPARK_STEPS = [
                      '--conf', 'spark.driver.maxResultSize=5g',
                      '--conf', 'spark.sql.execution.arrow.pyspark.enabled=true',
                      '--conf', 'spark.dynamicAllocation.enabled=false',
-                     's3://notebooks-256240406578/sparkcode/etlgov/Socios.py'
+                     f's3://256240406578-datalake-{ENVIRONMENT}-raw/sparkcode/etlgov/Socios.py'
                      ]
         }
     }
 ]
-
-
-# Acessando o valor da variável json_file_path
 
 
 # DAG VARIABLES
@@ -306,7 +397,7 @@ with DAG(DAG_ID,
     # Create the EMR cluster
     create_emr_cluster = EmrCreateJobFlowOperator(
         task_id="create_emr_cluster",
-        job_flow_overrides={
+        job_flow_overrides = {
             "Name": f"{TYPE}-{EVENT}-model-{ENVIRONMENT}-{MODE}",
             "LogUri": f"s3://256240406578-datalake-{ENVIRONMENT}-raw/emr-logs",
             "ReleaseLabel": "emr-6.9.0",
@@ -392,7 +483,7 @@ with DAG(DAG_ID,
             },
             "StepConcurrencyLevel": 3
         },
-        aws_conn_id="aws_default"
+    aws_conn_id="aws_default"
     )
     # return_value:	j-2CRY5GGQV1F45
 
@@ -408,8 +499,8 @@ with DAG(DAG_ID,
     add_steps = EmrAddStepsOperator(
         task_id=STEP_TASK_ID,
         job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_cluster', key='return_value') }}",
-        aws_conn_id="aws_default",
-        steps=SPARK_STEPS
+        steps=SPARK_STEPS,
+        aws_conn_id="aws_default"
     )
     last_step = len(SPARK_STEPS) - 1
 
@@ -426,8 +517,9 @@ with DAG(DAG_ID,
     # Terminate the EMR cluster
     terminate_emr_cluster = EmrTerminateJobFlowOperator(
         task_id="terminate_emr_cluster",
-        job_flow_id="{{ task_inzstance.xcom_pull(task_ids='create_emr_cluster', key='return_value') }}",
+        job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_cluster', key='return_value') }}",
         aws_conn_id="aws_default",
+        trigger_rule=TriggerRule.NONE_FAILED
     )
 
     # Only display - end_dag
