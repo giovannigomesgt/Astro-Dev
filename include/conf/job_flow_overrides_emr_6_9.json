@@ -1,0 +1,93 @@
+{
+    "Name": "{type}-{event}-model-{environment}-{mode}",
+    "LogUri": "s3://pottencial-datalake-{environment}-raw/emr-logs",
+    "ReleaseLabel": "emr-6.9.0",
+    "Applications": [{"Name": "Spark"},{"Name": "Hadoop"},{"Name": "JupyterHub"}],
+    "Configurations": [
+        {
+            "Classification": "spark-env",
+            "Properties": {},
+            "Configurations": [{
+                "Classification": "export",
+                "Properties": {
+                    "PYSPARK_PYTHON": "/usr/bin/python3",
+                    "PYSPARK_DRIVER_PYTHON": "/usr/bin/python3"
+                }
+            }]
+        },
+        {
+            "Classification": "spark-hive-site",
+            "Properties": {
+                "hive.metastore.client.factory.class": "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory"
+            }
+        },
+        {
+            "Classification": "spark-defaults",
+            "Properties": {
+                "spark.submit.deployMode": "cluster",
+                "spark.speculation": "false",
+                "spark.sql.adaptive.enabled": "true",
+                "spark.serializer": "org.apache.spark.serializer.KryoSerializer",
+                "spark.driver.extraJavaOptions": 
+                    "-XX:+UseG1GC -XX:+UnlockDiagnosticVMOptions -XX:+G1SummarizeConcMark -XX:InitiatingHeapOccupancyPercent=35 -verbose:gc -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:OnOutOfMemoryError=\"kill -9 %p\"",
+                    "spark.storage.level": "MEMORY_AND_DISK_SER",
+                    "spark.rdd.compress": "true",
+                    "spark.shuffle.compress": "true",
+                    "spark.shuffle.spill.compress": "true"
+            }
+        },
+        {
+            "Classification": "spark",
+            "Properties": {
+                "maximizeResourceAllocation": "true"
+            }
+        },
+        {
+            "Classification": "emrfs-site",
+            "Properties": {
+                "fs.s3.maxConnections": "1000"
+            }
+        }
+    ],
+    "Instances": {
+        "InstanceGroups": [
+            {
+                "Name": "Master nodes",
+                "Market": "ON_DEMAND",
+                "InstanceRole": "MASTER",
+                "InstanceType": "c5.xlarge",
+                "InstanceCount": 1
+            },
+            {
+                "Name": "Worker nodes",
+                "Market": "ON_DEMAND",
+                "InstanceRole": "CORE",
+                "InstanceType": "r5a.xlarge",
+                "InstanceCount": 3
+            }
+        ],
+        "KeepJobFlowAliveWhenNoSteps": true,
+        "TerminationProtected": false,
+        "Ec2SubnetId": "subnet-00709a3ade46a24c7"
+    },
+    "JobFlowRole": "EMR_EC2_DefaultRole",
+    "ServiceRole": "EMR_DefaultRole",
+    "VisibleToAllUsers": true,
+    "Tags": [
+        {"Key": "BusinessDepartment", "Value": "Pottencial"},{"Key": "CostCenter", "Value": "N/A"},{"Key": "environment", "Value": "{environment}"}, 
+        {"Key": "ProjectName", "Value": "Data Lake"}, {"Key": "TechnicalTeam", "Value": "Arquitetura"}
+    ],
+    "BootstrapActions": [
+            {
+                "Name": "Install Python Libs",
+                "ScriptBootstrapAction": {
+                    "Path": "s3://256240406578-datalake-{environment}-raw/codes/emr-jobs/scripts/bootstrap_install_emr_cluster.sh"
+                }
+            }
+    ],
+    "StepConcurrencyLevel": 4,
+
+    "AutoTerminationPolicy":{
+        "IdleTimeout": 120
+    }
+}
