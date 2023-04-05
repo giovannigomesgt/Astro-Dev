@@ -11,8 +11,6 @@ from airflow.providers.amazon.aws.operators.emr import (
 )
 from airflow.providers.amazon.aws.sensors.emr import EmrStepSensor, EmrJobFlowSensor
 
-from airflow.providers.amazon.aws.operators.emr import EMRStepOperator
-
 
 # VARIABLES
 EVENT = "gov"
@@ -308,8 +306,8 @@ with DAG('create_emr_cluster',
     create_emr_cluster = EmrCreateJobFlowOperator(
         task_id="create_emr_cluster",
         job_flow_overrides={
-            "Name": "{type}-{event}-model-{environment}-{mode}",
-                    "LogUri": "s3://256240406578-datalake-{environment}-raw/emr-logs",
+            "Name": f"{TYPE}-{EVENT}-model-{ENVIRONMENT}-{MODE}",
+                    "LogUri": f"s3://256240406578-datalake-{ENVIRONMENT}-raw/emr-logs",
                     "ReleaseLabel": "emr-6.9.0",
             "Applications": [{"Name": "Spark"}, {"Name": "Hadoop"}, {"Name": "JupyterHub"}],
                     "Configurations": [
@@ -369,7 +367,7 @@ with DAG('create_emr_cluster',
                     },
                     {
                         "Name": "Worker nodes",
-                        "Market": "ON_DEMAND",
+                        "Market": "SPOT",
                         "InstanceRole": "CORE",
                         "InstanceType": "r5a.xlarge",
                         "InstanceCount": 3
@@ -384,7 +382,7 @@ with DAG('create_emr_cluster',
             "VisibleToAllUsers": True,
             "Tags": [
                 {"Key": "BusinessDepartment", "Value": "Pottencial"}, {
-                    "Key": "CostCenter", "Value": "N/A"}, {"Key": "environment", "Value": "{environment}"},
+                    "Key": "CostCenter", "Value": "N/A"}, {"Key": "environment", "Value": f"{ENVIRONMENT}"},
                 {"Key": "ProjectName", "Value": "Data Lake"}, {
                     "Key": "TechnicalTeam", "Value": "Arquitetura"}
             ],
@@ -392,14 +390,14 @@ with DAG('create_emr_cluster',
                 {
                     "Name": "Install Python Libs",
                     "ScriptBootstrapAction": {
-                        "Path": "s3://256240406578-datalake-{environment}-raw/codes/emr-jobs/scripts/bootstrap_install_emr_cluster.sh"
+                        "Path": f"s3://256240406578-datalake-{ENVIRONMENT}-raw/codes/emr-jobs/scripts/bootstrap_install_emr_cluster.sh"
                     }
                 }
             ],
-            "StepConcurrencyLevel": 4,
+            "StepConcurrencyLevel": 5,
 
             "AutoTerminationPolicy": {
-                "IdleTimeout": 120
+                "IdleTimeout": 60
             }
         },
         aws_conn_id="aws_default"
@@ -409,26 +407,16 @@ with DAG('create_emr_cluster',
     wait_for_emr = EmrJobFlowSensor(
         task_id='wait_for_emr',
         job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_cluster', key='return_value') }}",
-        target_states=['WAITING'],
+        aws_conn_id='aws_default',
+        target_states=['WAITING']
+    )
+
+    submit_spark_step = EmrAddStepsOperator(
+        task_id=STEP_TASK_ID,
+        job_flow_id='{{ task_instance.xcom_pull(task_ids="create_emr_cluster", key="return_value") }}',
+        steps=SPARK_STEPS,
         aws_conn_id='aws_default'
     )
-
-    # submit_spark_step = EmrAddStepsOperator(
-    #     task_id=STEP_TASK_ID,
-    #     job_flow_id='{{ task_instance.xcom_pull(task_ids="create_emr_cluster", key="return_value") }}',
-    #     steps=SPARK_STEPS,
-    #     aws_conn_id='aws_default'
-
-    # )
-    # last_step = len(SPARK_STEPS) - 1
-
-    my_step_operator = EMRStepOperator(
-    task_id='my_step_operator',
-    job_flow_id='j-XXXXXXXXXXXXX',
-    steps=steps,
-    wait_for_completion=True
-    )
-
 
     # Wait executions of all steps
     wait_for_steps_completion = EmrStepSensor(
