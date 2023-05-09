@@ -280,7 +280,7 @@ def emrStepsCreator(ds, **kwargs):
 
     return SPARK_STEPS
 #f's3://{BUCKET_NAME_SCRIPTS }/{S3_SCRIPT_CNPJ_ETL_REFINED_MODEL}', ENVIRONMENT, TABLES
-
+#
 def get_steps_return(**context):
     ti = context['ti']
     add_steps_result = ti.xcom_pull(task_ids=STEP_TASK_ID)
