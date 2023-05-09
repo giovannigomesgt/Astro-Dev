@@ -31,7 +31,7 @@ EVENT = "dadosgov"
 # Variables
 ENVIRONMENT = Variable.get("ENVIRONMENT")
 CONF_CLUSTER = Variable.get("path_conf_cluster")
-BUCKET_NAME_SCRIPTS = f'pottencial-datalake-{ENVIRONMENT}-raw'
+BUCKET_NAME_SCRIPTS = f'256240406578-datalake-{ENVIRONMENT}-raw'
 RF_URL = 'https://dadosabertos.rfb.gov.br/CNPJ/'
 S3_SCRIPT_CNPJ_ETL_REFINED_MODEL = "codes/emr-jobs/refined/cnpjgov_model.py"
 
@@ -41,13 +41,13 @@ STEP_TASK_ID = f"add_steps_{EVENT}_model"
 TAGS = ["DataLake", "EMR", f"AWS{ENVIRONMENT.upper()}EMR", EVENT.capitalize(), 'Versionamento', 'CNPJ','S3','EMR','GOV']
 
 
-# TASKS VARIABLES
+# TASKS VARIABELS
 STEP_PARAMS = {
-    "BUCKET_NAME_SCRIPTS": BUCKET_NAME_SCRIPTS,
-    "S3_SCRIPT_CNPJ_ETL_REFINED_MODEL": S3_SCRIPT_CNPJ_ETL_REFINED_MODEL
+    "BUCKET_NAME": BUCKET_NAME_SCRIPTS,
+    "S3_SCRIPT": S3_SCRIPT_CNPJ_ETL_REFINED_MODEL
 }
 
-with open(CONF_CLUSTER) as conf_cluster:
+with open(CONF_CLUSTER)  as conf_cluster:
     JOB_FLOW_OVERRIDES_STR = conf_cluster.read()
     JOB_FLOW_OVERRIDES_STR = JOB_FLOW_OVERRIDES_STR.replace('{type}',TYPE)\
                                                     .replace('{event}',EVENT)\
@@ -266,20 +266,21 @@ def emrStepsCreator(ds, **kwargs):
         for k, v in file.items():
             TABLES.append(k)
             
-        SPARK_STEPS = {
-            'Name': f'Processa dados do Gov',
-            'ActionOnFailure': "CONTINUE",
+        SPARK_STEPS = [{
+            'Name': 'Processa dados do Gov',
+            'ActionOnFailure': 'CONTINUE',
             'HadoopJarStep': {
                 'Jar': 'command-runner.jar',
                 'Args': [
                 'spark-submit',
-                's3://{{params.BUCKET_NAME_SCRIPTS }}/{{ params.S3_SCRIPT_CLAIM_CREATED_TRUSTED_HISTORICAL }}', ENVIRONMENT, TABLES
+                's3://{{params.BUCKET_NAME}}/{{params.S3_SCRIPT}}', ENVIRONMENT, ','.join(TABLES)
                     ]
                 }
-            }
-        
-    return SPARK_STEPS
+            }]
 
+    return SPARK_STEPS
+#f's3://{BUCKET_NAME_SCRIPTS }/{S3_SCRIPT_CNPJ_ETL_REFINED_MODEL}', ENVIRONMENT, TABLES
+#
 def get_steps_return(**context):
     ti = context['ti']
     add_steps_result = ti.xcom_pull(task_ids=STEP_TASK_ID)
